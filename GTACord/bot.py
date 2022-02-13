@@ -151,7 +151,7 @@ async def on_message(message: discord.Message) -> None:
             msg = f'{datetime.datetime.now().strftime("[%Y-%#m-%#d %H:%M:%S]")} [Chat|Discord] {message.author.display_name} wrote: {message.content}'
             with open(LOGFILE, 'a', encoding='utf8') as f:
                 f.write(f'\n{datetime.datetime.now().strftime("[%Y-%#m-%#d %H:%M:%S]")} [Chat|Discord] {message.author.display_name} wrote: {message.content}')
-            banned = f'Discord: {message.author.display_name}: {message.content}'
+            banned = f'[Discord] {message.author.display_name}: {message.content}'
 
 async def get_matching(username: str) -> List[str]:
     await check_db()

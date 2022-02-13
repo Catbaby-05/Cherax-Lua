@@ -171,7 +171,7 @@ end
 
 while g_isRunning do
     Main()
-    g_util.yield(100)
+    g_util.yield()
 end
 
 g_lua.unregister();

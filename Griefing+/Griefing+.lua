@@ -39,12 +39,40 @@ function GetGriefer(PID)
     TASK.TASK_COMBAT_PED(jesus, playerped, 0, 16)
 end
 
+Players = {}
+
+function SetSpawn(value, PID)
+    Players[PID] = value
+end
+
+function Spawn(PID)
+    local playerped = PLAYER.GET_PLAYER_PED(PID)
+    local location = PLAYER.GET_PLAYER_COORDS(PID)
+    local rotation = ENTITY.GET_ENTITY_ROTATION(playerped, 0)
+    local womanhash = g_util.joaat('A_F_Y_Topless_01')
+    STREAMING.REQUEST_MODEL(womanhash)
+    while not STREAMING.HAS_MODEL_LOADED(womanhash) do
+        g_util.yield()
+    end
+    local woman = PED.CREATE_PED(0, womanhash, location.x, location.y, location.z, rotation.z, true, true)
+    PED.SET_PED_COMBAT_ATTRIBUTES(woman, 5, true)
+    PED.SET_PED_COMBAT_ATTRIBUTES(woman, 46, true)
+    TASK.TASK_COMBAT_PED(woman, playerped, 0, 16)
+end
+
 for i=0, 31 do
     g_gui.add_button('player_options_griefing_' .. i, 'Spawn Extreme Griefer Jesus', function() GetGriefer(g_util.get_selected_player()) end)
+    g_gui.add_toggle('player_options_griefing_' .. i, 'Spawn Angry Naked Women', function(value) SetSpawn(value, g_util.get_selected_player()) end)
 end
 
 while g_isRunning do
-    g_util.yield(100)
+    for i=0, 31 do
+        local value = Players[i]
+        if value then
+            Spawn(i)
+        end
+    end
+    g_util.yield()
 end
 
 g_lua.unregister()
