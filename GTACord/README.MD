@@ -26,7 +26,7 @@ python -m pip install -r requirements.txt
 ```
 You can now delete requirements.txt as we don't need it anymore.
 
-Create a new file '.env' in the same folder as bot.py and add these lines to it:
+Create a new file '.env' (without anything in front) in the same folder as bot.py and add these lines to it:
 ```
 TOKEN=''
 ChannelID=''
