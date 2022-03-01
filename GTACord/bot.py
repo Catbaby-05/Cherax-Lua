@@ -1,3 +1,4 @@
+import psutil
 import discord
 import os
 import datetime
@@ -5,7 +6,7 @@ import aiosqlite
 
 from difflib import get_close_matches
 from ast import literal_eval
-from typing import List, Tuple
+from typing import List, Union, Dict
 from dotenv import load_dotenv
 from discord.ext import tasks
 from discord import Option
@@ -16,145 +17,123 @@ TOKEN = os.getenv('TOKEN')
 CHANNELID = os.getenv('ChannelID')
 GUILDID = os.getenv('GuildID')
 LOGFILE = f'{os.getenv("APPDATA")}\\Cherax\\Cherax.log'
-channel = None
-lastline = None
-lastsend = None
-playerpos = 0
-lastplayer = None
-banned = None
+LINES = []
 
 @client.event
 async def on_ready() -> None:
-    global channel
-    channel = client.get_channel(int(CHANNELID))
-    if not get_message.is_running():
-        get_message.start()
-    if not get_players.is_running():
-        get_players.start()
+    print(f'Logged in as {client.user.name}#{client.user.discriminator}.')
+    if not handleLog.is_running():
+        handleLog.start()
 
-async def check_db() -> None:
+async def checkDatabase() -> None:
     async with aiosqlite.connect('players.db') as db:
         await db.execute('create table if not exists Players(RID INTEGER, Username TEXT, IP TEXT)')
 
-async def handle(rid: int, username: str, ip: str) -> None:
-    await check_db()
+async def handleDatabase(rid: int, name: str, ip: str) -> None:
+    await checkDatabase()
     async with aiosqlite.connect('players.db') as db:
         async with db.execute(f'select Username, IP from Players where RID="{rid}"') as cursor:
             result = await cursor.fetchone()
         if not result:
-            username = [username]
-            ip = [ip]
+            db_name = [name]
+            db_ip = [ip]
             await db.execute(f'insert into Players(RID, Username, IP) values(?,?,?)',
-                            (rid, str(username), str(ip)))
+                            (rid, str(db_name), str(db_ip)))
             await db.commit()
         else:
-            db_username, db_ip = result
-            db_username = literal_eval(db_username)
+            db_name, db_ip = result
+            db_name = literal_eval(db_name)
             db_ip = literal_eval(db_ip)
-            if username not in db_username:
-                db_username.append(username)
-                await db.execute(f'update Players set Username="{str(db_username)}" where RID="{rid}"')
+            if name not in db_name:
+                db_name.append(name)
+                await db.execute(f'update Players set Username="{str(db_name)}" where RID="{rid}"')
                 await db.commit()
             if ip not in db_ip:
                 db_ip.append(ip)
-                await db.execute(f'update Players set IP="{str(db_ip)}" where RID="{rid}"')
+                await db.execute(f'update Players set Username="{str(db_ip)}" where RID="{rid}"')
                 await db.commit()
 
-async def getlines() -> List[str]:
+@tasks.loop(seconds=0.1)
+async def handleLog() -> None:
     with open(LOGFILE, 'r', encoding='utf8') as f:
-        return [line.strip() for line in f]
+        for line in f:
+            if line.strip() not in LINES:
+                strippedline = line.strip().split(' ', 2)[2]
+                events = strippedline.split(' ', 1)
+                if events[0] == '[Chat|All]':
+                    LINES.append(line.strip())
+                    name, msg = events[1].split(' wrote: ', 1)
+                    if not msg.startswith('[Discord] '):
+                        channel = client.get_channel(int(CHANNELID))
+                        if len(await channel.webhooks()) == 0:
+                            webhook = await channel.create_webhook(name='GTA Online')
+                        else:
+                            webhook = (await channel.webhooks())[0]
+                        await webhook.send(msg, username=name, avatar_url=client.user.display_avatar.url)
+                else:
+                    LINES.append(line.strip())
+                    events = strippedline.split(' ', 2)
+                    if events[0] == '[Session]' and events[1] == 'Player':
+                        name = events[2].split(' (', 1)[0]
+                        rid = events[2].split(' (', 1)[1].split(') - ', 1)[0]
+                        ip = events[2].split(' (', 1)[1].split(') - ', 1)[1].split(' - ', 1)[0]
+                        await handleDatabase(int(rid), name, ip)
 
-async def getchat(line: str) -> Tuple[str, str]:
-    try:
-        line = line.split(' ', 2)[2]
-        event = line.split(' ', 1)
-        if event[0] != '[Chat|All]':
-            return False
-        return event[1].split(' wrote: ', 1)
-    except:
+async def getSessionInfo() -> Union[Dict, bool]:
+    players = {}
+    nomgrcount = 0
+    leftcount = 0
+    count = 0
+    nomgr = None
+    if 'GTA5.exe' not in (p.name() for p in psutil.process_iter()):
         return False
-
-async def getplayer(line: str) -> Tuple[int, str, str]:
-    try:
-        line = line.split(' ', 2)[2]
-        event = line.split(' ', 2)
-        if event[0] == '[Session]' and event[1] == 'Player':
-            eventsplit = event[2].split(' (', 1)
-            username = eventsplit[0]
-            eventsplit = eventsplit[1].split(') - ')
-            rid = eventsplit[0]
-            ip = eventsplit[1].split(' - ')[0]
-            return rid, username, ip
-        else:
-            return False
-    except:
-        raise
-
-@tasks.loop(seconds=0.5)
-async def get_message() -> None:
-    global channel, lastline, lastsend
-    last_line = (await getlines())[-1]
-    if last_line == lastline:
-        return
-    else:
-        lastline = last_line
-    if lastline == lastsend:
-        return
-    else:
-        lastchat = await getchat(last_line)
-        if not lastchat:
-            return
-        else:
-            author, message = lastchat
-            if len(await channel.webhooks()) == 0:
-                webhook = await channel.create_webhook(name='GTA Online')
-            else:
-                webhook = (await channel.webhooks())[0]
-            if message != banned:
-                await webhook.send(message, username=author, avatar_url=client.user.display_avatar.url)
-                lastsend = last_line
-
-@tasks.loop(seconds=0.5)
-async def get_players():
-    global playerpos, lastplayer
-    if playerpos == 0:
-        lines = await getlines()
-        for line in lines:
-            player = await getplayer(line)
-            if not player:
+    with open(LOGFILE, 'r', encoding='utf8') as f:
+        for line in f:
+            nomgrcount += 1
+            if line.strip().split(' ', 2)[2] == '[Hooking] NOMGR hooked':
+                nomgr = nomgrcount
+    if not nomgr:
+        return False
+    with open(LOGFILE, 'r', encoding='utf8') as f:
+        for line in f:
+            leftcount += 1
+            if leftcount < nomgr:
+                continue
+            elif line.strip().split(' ', 2)[2] == '[Info] Left session':
+                return False
+    with open(LOGFILE, 'r', encoding='utf8') as f:
+        for line in f:
+            count += 1
+            if count < nomgr:
                 continue
             else:
-                rid, username, ip = player
-                await handle(rid, username, ip)
-        playerpos = len(lines)
-    else:
-        last_line = (await getlines())[-1]
-        if last_line == lastplayer:
-            return
-        else:
-            lastplayer = last_line
-            playerpos += 1
-            player = await getplayer(last_line)
-            if not player:
-                return
-            else:
-                rid, username, ip = player
-                await handle(rid, username, ip)
+                line = line.strip().split(' ', 2)[2]
+                events = line.split(' ', 2)
+                if events[0] == '[Session]' and events[1] == 'Player':
+                    name = events[2].split(' (', 1)[0]
+                    rid = events[2].split(' (', 1)[1].split(') - ', 1)[0]
+                    ip = events[2].split(' (', 1)[1].split(') - ', 1)[1].split(' - ', 1)[0]
+                    event = events[2].split(' (', 1)[1].split(') - ', 1)[1].split(' - ', 1)[1]
+                    if event == 'has joined your session':
+                        players[rid] = (name, ip)
+                    elif event == 'has left your session':
+                        try:
+                            del players[rid]
+                        except:
+                            pass
+    return players
 
 @client.event
 async def on_message(message: discord.Message) -> None:
-    global banned
     if message.channel.id == int(CHANNELID) and message.author.id != client.user.id and not message.webhook_id:
         if len(message.content) > 0:
             if len(message.content) > 120:
                 message.content = f'{message.content[:120]}...'
-            msg = f'{datetime.datetime.now().strftime("[%Y-%#m-%#d %H:%M:%S]")} [Chat|Discord] {message.author.display_name} wrote: {message.content}'
+            msg = f'{datetime.datetime.now().strftime("[%Y-%#m-%#d %H:%M:%S]")} [Chat|Discord] {message.author.display_name} wrote: {message.content}\n'
             with open(LOGFILE, 'a', encoding='utf8') as f:
-                f.write(f'\n{datetime.datetime.now().strftime("[%Y-%#m-%#d %H:%M:%S]")} [Chat|Discord] {message.author.display_name} wrote: {message.content}')
-            banned = f'[Discord] {message.author.display_name}: {message.content}'
+                f.write(msg)
 
-async def get_matching(username: str) -> List[str]:
-    await check_db()
+async def getCloseMatches(username: str) -> List[str]:
     async with aiosqlite.connect('players.db') as db:
         async with db.execute(f'select Username from Players') as cursor:
             usernames_db = await cursor.fetchall()
@@ -167,14 +146,15 @@ async def get_matching(username: str) -> List[str]:
 @client.slash_command(guild_ids=[int(GUILDID)])
 async def get(ctx: discord.ApplicationContext, username: Option(str, 'The GTA Online username.')) -> None:
     '''Get information about a GTA Online player by username.'''
-    await check_db()
+    await checkDatabase()
     async with aiosqlite.connect('players.db') as db:
         async with db.execute(f'select RID, Username, IP from Players where Username like "%\'{username}\'%"') as cursor:
             result = await cursor.fetchone()
         if not result:
-            close_matches = await get_matching(username)
+            close_matches = await getCloseMatches(username)
             embed = discord.Embed(
                 title=':x: User not found.',
+                color=discord.Color.embed_background(),
                 timestamp=discord.utils.utcnow()
             )
             embed.set_footer(
@@ -182,18 +162,15 @@ async def get(ctx: discord.ApplicationContext, username: Option(str, 'The GTA On
                 icon_url=client.user.display_avatar.url
             )
             if len(close_matches) > 0:
-                matches = '\n- '.join(close_matches)
-                matches = f'- {matches}'
-                embed.description = f'Perhaps you meant:\n\n{matches}'
-            await ctx.respond(embed = embed)
+                embed.description = f'Perhaps you meant:\n\n- ' + '\n- '.join(close_matches)
+            await ctx.respond(embed = embed, ephemeral=True)
         else:
-            rid, username, ip = result
-            ip = '\n- '.join(literal_eval(ip))
-            ip = f'- {ip}'
-            username = '\n- '.join(literal_eval(username))
-            username = f'- {username}'
+            rid, name, ip = result
+            ip = f'- ' + '\n'.join(literal_eval(ip))
+            name = f'- ' + '\n'.join(literal_eval(name))
             embed = discord.Embed(
-                title='User Information.',
+                title='User information.',
+                color=discord.Color.embed_background(),
                 timestamp=discord.utils.utcnow()
             )
             embed.set_thumbnail(
@@ -204,11 +181,11 @@ async def get(ctx: discord.ApplicationContext, username: Option(str, 'The GTA On
                 icon_url=client.user.display_avatar.url
             )
             embed.add_field(
-                name='Known Usernames',
+                name='Known usernames',
                 value=username
             )
             embed.add_field(
-                name='Known IP Addresses',
+                name='Known IP addresses',
                 value=ip
             )
             embed.add_field(
@@ -217,5 +194,69 @@ async def get(ctx: discord.ApplicationContext, username: Option(str, 'The GTA On
                 inline=False
             )
             await ctx.respond(embed = embed)
+
+@client.slash_command(guild_ids=[int(GUILDID)])
+async def session(ctx: discord.ApplicationContext) -> None:
+    '''Display information about the current session.'''
+    players = await getSessionInfo()
+    if players == False:
+        embed = discord.Embed(
+            title=':x: No active session.',
+            color=discord.Color.embed_background(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(
+            text='\u200b',
+            icon_url=client.user.display_avatar.url
+        )
+        await ctx.respond(embed = embed, ephemeral=True)
+    elif len(players.keys()) == 0:
+        embed = discord.Embed(
+            title=':x: No players in session.',
+            color=discord.Color.embed_background(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(
+            text='\u200b',
+            icon_url=client.user.display_avatar.url
+        )
+        await ctx.respond(embed = embed, ephemeral=True)
+    else:
+        count = 1
+        names = []
+        rids = []
+        ips = []
+        for rid in players.keys():
+            name, ip = players[rid]
+            names.append(f'{count}. {name}')
+            rids.append(rid)
+            ips.append(ip)
+            count += 1
+        embed = discord.Embed(
+            title='Session information.',
+            color=discord.Color.embed_background(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(
+            text='\u200b',
+            icon_url=client.user.display_avatar.url
+        )
+        embed.add_field(
+            name='Name',
+            value='\n'.join(names)
+        )
+        embed.add_field(
+            name='RID',
+            value='\n'.join(rids)
+        )
+        embed.add_field(
+            name='IP',
+            value='\n'.join(ips)
+        )
+        await ctx.respond(embed = embed)
+
+with open(LOGFILE, 'r', encoding='utf8') as f:
+    for line in f:
+        LINES.append(line.strip())
            
 client.run(TOKEN)

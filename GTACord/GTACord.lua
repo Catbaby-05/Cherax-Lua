@@ -1,4 +1,4 @@
-g_lua.register();
+g_lua.register()
 
 Lines = {}
 LogFile = MISC.GET_APPDATA_PATH('Cherax', 'Cherax.log')
@@ -18,63 +18,51 @@ function string:split(inSplitPattern, outResults)
     return outResults
 end
 
-function Ischat(line)
-    local pattern = '^%[Chat|Discord%] '
-    local chattable = line:split(' ')
-    for i, x in pairs(chattable) do
-        if i == 1 then
-            Date1 = x
-        elseif i == 2 then
-            Date = Date1 .. ' ' .. x
-        elseif i == 3 then
-            Rest = x
-        else
-            Rest = Rest .. ' ' .. x
-        end
-    end
-    if string.find(Rest, pattern) ~= nil then
-        return line:split(' wrote: ')
-    else
-        return false
-    end
+function IsChat(msg)
+    return string.find(msg, '^%[Chat|Discord%] ') ~= nil
 end
 
-function Main()
-    for line in io.lines(LogFile) do
-        for i, x in pairs(Lines) do
-            if x == line then
-                goto continue
+function HandleChat(line)
+    Lines[line] = true
+    local msg = nil
+    for i, x in pairs(line:split(' ')) do
+        if i == 3 then
+            msg = x
+        elseif i > 3 then
+            msg = msg .. ' ' .. x
+        end
+    end
+    if IsChat(msg) == true then
+        local name = nil
+        local message = nil
+        for i, x in pairs(string.split(msg, ' wrote: ')) do
+            if i == 1 then
+                for i2, x2 in pairs(string.split(x, ' ')) do
+                    if i2 == 2 then
+                        name = x2
+                    end
+                end
+            elseif i == 2 then
+                message = x
             end
         end
-        if Ischat(line) ~= false then
-            for i, x in pairs(Ischat(line)) do
-                if i == 1 then
-                    Prefix = x
-                elseif i == 2 then
-                    Message = x
-                end
-            end
-            for i, x in pairs(Prefix:split(' ')) do
-                if i == 4 then
-                    PlayerName = x
-                end
-            end
-            table.insert(Lines, line)
-            NETWORK.SEND_CHAT_MESSAGE('[Discord] '.. PlayerName .. ': ' .. Message, false)
+        if name ~= nil then
+            NETWORK.SEND_CHAT_MESSAGE('[Discord] '.. name .. ': ' .. message, false)
         end
-        ::continue::
     end
 end
 
 for line in io.lines(LogFile) do
-    if Ischat(line) ~= false then
-        table.insert(Lines, line)
-    end
+    Lines[line] = true
 end
 
 while g_isRunning do
-    Main()
-    g_util.yield()
+    for line in io.lines(LogFile) do
+        if Lines[line] == nil then
+            HandleChat(line)
+        end
+    end
+    g_util.yield(100)
 end
 
-g_lua.unregister();
+g_lua.unregister()

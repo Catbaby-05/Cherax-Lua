@@ -1,4 +1,4 @@
-# GTACord V1
+# GTACord V1.1
 
 ## Description
 
@@ -41,4 +41,11 @@ python bot.py
 
 ## Options (Discord)
 
-- /get \<username>
+- /get \<username> **|** Get information about a specific user.
+- /session **|** Get information about all players in current session.
+
+## Changelog
+
+V1.1:
+- Fixed Lag
+- Added Session Command
